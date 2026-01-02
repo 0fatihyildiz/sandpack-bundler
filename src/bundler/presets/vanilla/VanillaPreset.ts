@@ -57,7 +57,10 @@ export class VanillaPreset extends Preset {
   }
 
   augmentDependencies(dependencies: DepMap): DepMap {
-    dependencies['core-js'] = '3.22.7';
+    // core-js is optional for vanilla, don't require it
+    if (Object.keys(dependencies).length > 0) {
+      dependencies['core-js'] = '3.22.7';
+    }
     return dependencies;
   }
 }
