@@ -16,12 +16,12 @@ FROM node:18-alpine AS production
 
 WORKDIR /app
 
-# Copy only production dependencies
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile --production && yarn cache clean
-
-# Copy built files and server
+# Copy built files
 COPY --from=builder /app/dist ./dist
+
+# Install only server dependencies
+RUN yarn add fastify@3 fastify-static@4 && yarn cache clean
+
 COPY server.js ./
 
 # Easypanel uses PORT env variable
