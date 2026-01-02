@@ -13,6 +13,12 @@ import * as logger from './utils/logger';
 
 const bundlerStartTime = Date.now();
 
+// Check if we're in preview mode (URL: /preview/:bundleId)
+function getPreviewBundleId(): string | null {
+  const match = window.location.pathname.match(/^\/preview\/([^/]+)/);
+  return match ? match[1] : null;
+}
+
 class SandpackInstance {
   private messageBus: IFrameParentMessageBus;
   private disposableStore = new DisposableStore();
@@ -218,4 +224,102 @@ class SandpackInstance {
   }
 }
 
-new SandpackInstance();
+// Standalone preview mode - loads bundle from server
+class PreviewInstance {
+  private bundler: Bundler;
+  private messageBus: IFrameParentMessageBus;
+
+  constructor(private bundleId: string) {
+    this.messageBus = new IFrameParentMessageBus();
+    this.bundler = new Bundler({ messageBus: this.messageBus });
+    this.loadBundle();
+  }
+
+  private async loadBundle() {
+    try {
+      const response = await fetch(`/api/bundle/${this.bundleId}`);
+      if (!response.ok) {
+        this.showError('Bundle not found or expired');
+        return;
+      }
+
+      const bundle = await response.json();
+      await this.compile(bundle);
+    } catch (error) {
+      logger.error(error);
+      this.showError('Failed to load bundle');
+    }
+  }
+
+  private showError(message: string) {
+    document.body.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#666;">
+        <div style="text-align:center;">
+          <h2 style="color:#333;">Preview Error</h2>
+          <p>${message}</p>
+        </div>
+      </div>
+    `;
+  }
+
+  private async compile(bundle: { files: Record<string, { code: string }>; entry: string; template?: string }) {
+    // Convert files to expected format
+    const files = Object.entries(bundle.files).map(([path, file]) => ({
+      path,
+      code: file.code,
+    }));
+
+    // Detect template from entry point or use provided template
+    const template = bundle.template || this.detectTemplate(bundle.entry, files);
+
+    this.bundler.resetModules();
+    await this.bundler.initPreset(template);
+
+    const evaluate = await this.bundler.compile(files);
+
+    this.bundler.replaceHTML();
+
+    if (evaluate) {
+      evaluate();
+    }
+  }
+
+  private detectTemplate(entry: string, files: { path: string; code: string }[]): string {
+    // Check if entry is HTML
+    if (entry.endsWith('.html') || entry.endsWith('.htm')) {
+      return 'vanilla';
+    }
+
+    // Check if project has React
+    const pkgJson = files.find((f) => f.path === '/package.json');
+    if (pkgJson) {
+      try {
+        const pkg = JSON.parse(pkgJson.code);
+        if (pkg.dependencies?.react || pkg.devDependencies?.react) {
+          return 'react';
+        }
+        if (pkg.dependencies?.['solid-js'] || pkg.devDependencies?.['solid-js']) {
+          return 'solid';
+        }
+      } catch {
+        // ignore parse error
+      }
+    }
+
+    // Check file extensions for JSX/TSX
+    const hasJsx = files.some((f) => /\.(jsx|tsx)$/.test(f.path));
+    if (hasJsx) {
+      return 'react';
+    }
+
+    return 'vanilla';
+  }
+}
+
+// Initialize based on URL
+const bundleId = getPreviewBundleId();
+if (bundleId) {
+  new PreviewInstance(bundleId);
+} else {
+  new SandpackInstance();
+}

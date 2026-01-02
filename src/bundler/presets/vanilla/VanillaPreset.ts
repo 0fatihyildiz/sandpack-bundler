@@ -4,15 +4,15 @@ import { Module } from '../../module/Module';
 import { BabelTransformer } from '../../transforms/babel';
 import { CSSTransformer } from '../../transforms/css';
 import { HTMLTransformer } from '../../transforms/html';
-import { ReactRefreshTransformer } from '../../transforms/react-refresh';
 import { StyleTransformer } from '../../transforms/style';
 import { Preset } from '../Preset';
 
-export class ReactPreset extends Preset {
-  defaultHtmlBody = '<div id="root"></div>';
+export class VanillaPreset extends Preset {
+  defaultHtmlBody = '';
+  defaultEntryPoints: string[] = ['index.html', 'index.js', 'src/index.html', 'src/index.js'];
 
   constructor() {
-    super('react');
+    super('vanilla');
   }
 
   async init(bundler: Bundler): Promise<void> {
@@ -20,7 +20,6 @@ export class ReactPreset extends Preset {
 
     await Promise.all([
       this.registerTransformer(new BabelTransformer()),
-      this.registerTransformer(new ReactRefreshTransformer()),
       this.registerTransformer(new CSSTransformer()),
       this.registerTransformer(new StyleTransformer()),
       this.registerTransformer(new HTMLTransformer()),
@@ -28,47 +27,20 @@ export class ReactPreset extends Preset {
   }
 
   mapTransformers(module: Module): Array<[string, any]> {
-    if (/^(?!\/node_modules\/).*\.(((m|c)?jsx?)|tsx)$/.test(module.filepath)) {
-      return [
-        [
-          'babel-transformer',
-          {
-            presets: [
-              [
-                'react',
-                {
-                  runtime: 'automatic',
-                },
-              ],
-            ],
-            plugins: [
-              ['react-refresh/babel', { skipEnvCheck: true }],
-              '@babel/plugin-proposal-explicit-resource-management',
-            ],
-          },
-        ],
-        ['react-refresh-transformer', {}],
-      ];
-    }
-
+    // JavaScript/TypeScript files
     if (/\.(m|c)?(t|j)sx?$/.test(module.filepath) && !module.filepath.endsWith('.d.ts')) {
       return [
         [
           'babel-transformer',
           {
-            presets: [
-              [
-                'react',
-                {
-                  runtime: 'automatic',
-                },
-              ],
-            ],
+            presets: [],
+            plugins: ['@babel/plugin-proposal-explicit-resource-management'],
           },
         ],
       ];
     }
 
+    // CSS files
     if (/\.css$/.test(module.filepath)) {
       return [
         ['css-transformer', {}],
@@ -76,6 +48,7 @@ export class ReactPreset extends Preset {
       ];
     }
 
+    // HTML files
     if (/\.html?$/.test(module.filepath)) {
       return [['html-transformer', {}]];
     }
@@ -84,9 +57,6 @@ export class ReactPreset extends Preset {
   }
 
   augmentDependencies(dependencies: DepMap): DepMap {
-    if (!dependencies['react-refresh']) {
-      dependencies['react-refresh'] = '^0.11.0';
-    }
     dependencies['core-js'] = '3.22.7';
     return dependencies;
   }
