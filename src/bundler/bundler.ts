@@ -357,6 +357,23 @@ export class Bundler {
 
     this.onStatusChangeEmitter.fire('transpiling');
 
+    // Check if this is an HTML-only project
+    const isHTMLOnly = this.isHTMLOnlyProject();
+    logger.debug('Is HTML-only project:', isHTMLOnly);
+
+    if (isHTMLOnly) {
+      // For HTML-only projects, just return an empty evaluate function
+      // The HTML will be rendered by replaceHTML()
+      logger.debug('HTML-only project detected, skipping JS bundling');
+
+      this.messageBus.sendMessage('state', { state: { transpiledModules: {} } });
+
+      return () => {
+        logger.debug('HTML-only project - no JS to evaluate');
+        this.isFirstLoad = false;
+      };
+    }
+
     // Transform runtimes
     if (this.isFirstLoad) {
       for (const runtime of this.runtimes) {
@@ -452,6 +469,32 @@ export class Bundler {
       }
       return this.preset.defaultHtmlBody;
     }
+  }
+
+  /** Check if this is an HTML-only project (no JS entry point) */
+  isHTMLOnlyProject(): boolean {
+    const htmlExists = this.fs.isFileSync('/index.html') || this.fs.isFileSync('/public/index.html');
+    if (!htmlExists) return false;
+
+    // Check if there's a JS entry point
+    const jsEntryPoints = ['index.js', 'index.ts', 'index.jsx', 'index.tsx', 'src/index.js', 'src/index.ts', 'src/index.jsx', 'src/index.tsx'];
+    for (const entry of jsEntryPoints) {
+      if (this.fs.isFileSync(`/${entry}`)) {
+        return false;
+      }
+    }
+
+    // Check package.json main field
+    if (this.parsedPackageJSON?.main) {
+      const mainFile = this.parsedPackageJSON.main.startsWith('/')
+        ? this.parsedPackageJSON.main
+        : `/${this.parsedPackageJSON.main}`;
+      if (this.fs.isFileSync(mainFile) && !mainFile.endsWith('.html')) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   replaceHTML() {
