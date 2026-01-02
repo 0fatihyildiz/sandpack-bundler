@@ -22,12 +22,11 @@ app.setNotFoundHandler((req, reply) => {
 });
 
 // Run the server!
-app.listen(PORT, (err, address) => {
+app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
   if (err) {
     app.log.error(err);
     process.exit(1);
   }
 
-  // Server is now listening on ${address}
-  console.log(`Server is listening on http://localhost:${PORT}`);
+  console.log(`Server is listening on ${address}`);
 });
