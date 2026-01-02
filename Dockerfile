@@ -1,0 +1,31 @@
+# Build stage
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
+
+# Copy source and build
+COPY . .
+RUN yarn build
+
+# Production stage
+FROM node:18-alpine AS production
+
+WORKDIR /app
+
+# Copy only production dependencies
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile --production && yarn cache clean
+
+# Copy built files and server
+COPY --from=builder /app/dist ./dist
+COPY server.js ./
+
+# Easypanel uses PORT env variable
+ENV PORT=8080
+EXPOSE 8080
+
+CMD ["node", "server.js"]
