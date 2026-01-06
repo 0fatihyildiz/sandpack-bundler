@@ -175,10 +175,18 @@ class SandpackInstance {
       .catch((error: CompilationError) => {
         logger.error(error);
 
-        this.messageBus.sendMessage('action', errorMessage(error));
+        // Check if it's an empty project / no entry point error
+        const isEmptyProject = error?.message?.includes('Could not resolve entry point');
+
+        if (isEmptyProject) {
+          // Show a friendly empty state instead of error
+          this.showEmptyState();
+        } else {
+          this.messageBus.sendMessage('action', errorMessage(error));
+        }
 
         this.messageBus.sendMessage('done', {
-          compilatonError: true,
+          compilatonError: !isEmptyProject,
         });
       })
       .finally(() => {
@@ -219,6 +227,23 @@ class SandpackInstance {
     this.messageBus.sendMessage('status', { status: 'done' });
   }
 
+  private showEmptyState() {
+    document.body.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;background:#fafafa;">
+        <div style="text-align:center;max-width:400px;padding:40px;">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1.5" style="margin:0 auto 20px;">
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+            <polyline points="13 2 13 9 20 9"></polyline>
+          </svg>
+          <h2 style="color:#333;font-size:18px;margin:0 0 8px;font-weight:500;">No Preview Available</h2>
+          <p style="color:#888;font-size:14px;margin:0;line-height:1.5;">
+            Add an <code style="background:#f0f0f0;padding:2px 6px;border-radius:4px;">index.html</code> or <code style="background:#f0f0f0;padding:2px 6px;border-radius:4px;">index.js</code> file to see a preview.
+          </p>
+        </div>
+      </div>
+    `;
+  }
+
   dispose() {
     this.disposableStore.dispose();
   }
@@ -251,15 +276,32 @@ class PreviewInstance {
     }
   }
 
-  private showError(message: string) {
-    document.body.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#666;">
-        <div style="text-align:center;">
-          <h2 style="color:#333;">Preview Error</h2>
-          <p>${message}</p>
+  private showError(message: string, isEmptyProject = false) {
+    if (isEmptyProject) {
+      document.body.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;background:#fafafa;">
+          <div style="text-align:center;max-width:400px;padding:40px;">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1.5" style="margin:0 auto 20px;">
+              <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+              <polyline points="13 2 13 9 20 9"></polyline>
+            </svg>
+            <h2 style="color:#333;font-size:18px;margin:0 0 8px;font-weight:500;">No Preview Available</h2>
+            <p style="color:#888;font-size:14px;margin:0;line-height:1.5;">
+              Add an <code style="background:#f0f0f0;padding:2px 6px;border-radius:4px;">index.html</code> or <code style="background:#f0f0f0;padding:2px 6px;border-radius:4px;">index.js</code> file to see a preview.
+            </p>
+          </div>
         </div>
-      </div>
-    `;
+      `;
+    } else {
+      document.body.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#666;">
+          <div style="text-align:center;">
+            <h2 style="color:#333;">Preview Error</h2>
+            <p>${message}</p>
+          </div>
+        </div>
+      `;
+    }
   }
 
   private async compile(bundle: { files: Record<string, { code: string }>; entry: string; template?: string }) {
@@ -269,18 +311,39 @@ class PreviewInstance {
       code: file.code,
     }));
 
+    // Check if there are any meaningful files
+    const hasContent = files.some((f) => {
+      const isConfig = f.path === '/package.json' || f.path === '/tsconfig.json';
+      return !isConfig && f.code.trim().length > 0;
+    });
+
+    if (!hasContent || files.length === 0) {
+      this.showError('', true);
+      return;
+    }
+
     // Detect template from entry point or use provided template
     const template = bundle.template || this.detectTemplate(bundle.entry, files);
 
-    this.bundler.resetModules();
-    await this.bundler.initPreset(template);
+    try {
+      this.bundler.resetModules();
+      await this.bundler.initPreset(template);
 
-    const evaluate = await this.bundler.compile(files);
+      const evaluate = await this.bundler.compile(files);
 
-    this.bundler.replaceHTML();
+      this.bundler.replaceHTML();
 
-    if (evaluate) {
-      evaluate();
+      if (evaluate) {
+        evaluate();
+      }
+    } catch (error: any) {
+      // Check if it's an entry point error
+      if (error?.message?.includes('Could not resolve entry point')) {
+        this.showError('', true);
+      } else {
+        logger.error(error);
+        this.showError(error?.message || 'Compilation failed');
+      }
     }
   }
 
