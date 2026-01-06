@@ -183,7 +183,7 @@ export class Bundler {
   async resolveAsync(
     specifier: string,
     filename: string,
-    extensions: string[] = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.html', '.htm']
+    extensions: string[] = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.vue', '.svelte', '.html', '.htm']
   ): Promise<string> {
     try {
       const resolved = await resolveAsync(specifier, {
