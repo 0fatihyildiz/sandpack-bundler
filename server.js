@@ -15,6 +15,19 @@ function generateBundleId() {
   return "bnd_" + crypto.randomBytes(6).toString("hex");
 }
 
+// Check if project needs WebContainer (has dev/start/serve scripts)
+function checkNeedsWebContainer(files) {
+  const pkgJson = files["/package.json"];
+  if (!pkgJson || !pkgJson.code) return false;
+
+  try {
+    const pkg = JSON.parse(pkgJson.code);
+    return !!(pkg.scripts?.dev || pkg.scripts?.start || pkg.scripts?.serve);
+  } catch {
+    return false;
+  }
+}
+
 // CORS middleware
 app.addHook("onRequest", (request, reply, done) => {
   reply.header("Access-Control-Allow-Origin", "*");
@@ -47,7 +60,14 @@ app.post("/api/bundle", async (request, reply) => {
   // Auto-cleanup after 24 hours
   setTimeout(() => bundleStore.delete(bundleId), 24 * 60 * 60 * 1000);
 
-  return { bundleId, previewUrl: `/preview/${bundleId}` };
+  // Check if project needs WebContainer (has dev/start scripts)
+  const needsWebContainer = checkNeedsWebContainer(files);
+
+  return {
+    bundleId,
+    previewUrl: `/preview/${bundleId}`,
+    wcPreviewUrl: needsWebContainer ? `/wc-preview/${bundleId}` : null,
+  };
 });
 
 // Get bundle data
@@ -75,6 +95,11 @@ app.register(fastifyStatic, {
 
 // Preview route - serves the bundler which will load the bundle
 app.get("/preview/:bundleId", async (request, reply) => {
+  return reply.sendFile("index.html", { cacheControl: false });
+});
+
+// WebContainer preview route - for full Node.js support (npm install, dev server)
+app.get("/wc-preview/:bundleId", async (request, reply) => {
   return reply.sendFile("index.html", { cacheControl: false });
 });
 

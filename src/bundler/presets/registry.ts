@@ -5,7 +5,9 @@ import { ReactPreset } from './react/ReactPreset';
 import { SolidPreset } from './solid/SolidPreset';
 import { SveltePreset } from './svelte/SveltePreset';
 import { VanillaPreset } from './vanilla/VanillaPreset';
+import { VitePreset } from './vite/VitePreset';
 import { VuePreset } from './vue/VuePreset';
+import { WebpackPreset } from './webpack/WebpackPreset';
 
 const PRESET_MAP: Map<string, Preset> = new Map([
   // React variants
@@ -43,13 +45,19 @@ const PRESET_MAP: Map<string, Preset> = new Map([
   ['node-ts', new VanillaPreset()],
 
   // Vite variants
-  ['vite', new VanillaPreset()],
-  ['vite-react', new ReactPreset()],
-  ['vite-react-ts', new ReactPreset()],
+  ['vite', new VitePreset()],
+  ['vite-react', new VitePreset()],
+  ['vite-react-ts', new VitePreset()],
   ['vite-vue', new VuePreset()],
   ['vite-vue-ts', new VuePreset()],
   ['vite-svelte', new SveltePreset()],
   ['vite-svelte-ts', new SveltePreset()],
+  ['vite-ts', new VitePreset()],
+
+  // Webpack variants
+  ['webpack', new WebpackPreset()],
+  ['webpack-react', new WebpackPreset()],
+  ['webpack-ts', new WebpackPreset()],
 
   // Next.js
   ['nextjs', new ReactPreset()],
@@ -60,6 +68,10 @@ const PRESET_MAP: Map<string, Preset> = new Map([
 
   // Test runners
   ['test-ts', new VanillaPreset()],
+
+  // Create React App (uses webpack internally)
+  ['create-react-app', new WebpackPreset()],
+  ['cra', new WebpackPreset()],
 ]);
 
 export function getPreset(presetName: string): Preset {

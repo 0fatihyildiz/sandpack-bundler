@@ -379,9 +379,208 @@ class PreviewInstance {
   }
 }
 
+// WebContainer-based preview instance for full Node.js support
+class WebContainerPreviewInstance {
+  private container: any = null;
+  private serverUrl: string | null = null;
+  private outputDiv: HTMLDivElement | null = null;
+
+  constructor(private bundleId: string) {
+    this.init();
+  }
+
+  private async init() {
+    this.showLoading('Initializing WebContainer...');
+
+    try {
+      // Fetch bundle data
+      const response = await fetch(`/api/bundle/${this.bundleId}`);
+      if (!response.ok) {
+        this.showError('Bundle not found or expired');
+        return;
+      }
+
+      const bundle = await response.json();
+
+      // Check if this project needs WebContainer (has scripts in package.json)
+      const needsWebContainer = this.needsWebContainer(bundle.files);
+
+      if (needsWebContainer) {
+        await this.runWithWebContainer(bundle);
+      } else {
+        // Fall back to standard bundler for simple projects
+        const previewInstance = new PreviewInstance(this.bundleId);
+      }
+    } catch (error: any) {
+      logger.error(error);
+      this.showError(error?.message || 'Failed to initialize');
+    }
+  }
+
+  private needsWebContainer(files: Record<string, { code: string }>): boolean {
+    const pkgJson = files['/package.json'];
+    if (!pkgJson) return false;
+
+    try {
+      const pkg = JSON.parse(pkgJson.code);
+      // Check if there are dev/start scripts
+      return !!(pkg.scripts?.dev || pkg.scripts?.start || pkg.scripts?.serve);
+    } catch {
+      return false;
+    }
+  }
+
+  private async runWithWebContainer(bundle: { files: Record<string, { code: string }>; entry: string }) {
+    try {
+      // Dynamic import to avoid loading WebContainer for simple projects
+      const { webContainerManager } = await import('./webcontainer');
+
+      this.showLoading('Booting WebContainer...');
+      await webContainerManager.boot();
+
+      // Convert files
+      const files = Object.entries(bundle.files).map(([path, file]) => ({
+        path,
+        code: file.code,
+      }));
+
+      this.showLoading('Writing files...');
+      await webContainerManager.writeFiles(files);
+
+      // Listen for output
+      webContainerManager.onOutput((output) => {
+        this.appendOutput(output.data, output.type);
+      });
+
+      // Listen for server ready
+      webContainerManager.onServerReady((url) => {
+        this.serverUrl = url;
+        this.showPreview(url);
+      });
+
+      this.showLoading('Installing dependencies...');
+      this.showTerminal();
+      const installCode = await webContainerManager.npmInstall();
+
+      if (installCode !== 0) {
+        this.showError('npm install failed');
+        return;
+      }
+
+      this.appendOutput('\n--- Running dev server ---\n', 'stdout');
+
+      // Try to run dev script
+      const pkgJson = bundle.files['/package.json'];
+      if (pkgJson) {
+        const pkg = JSON.parse(pkgJson.code);
+        if (pkg.scripts?.dev) {
+          await webContainerManager.runScript('dev');
+        } else if (pkg.scripts?.start) {
+          await webContainerManager.runScript('start');
+        } else if (pkg.scripts?.serve) {
+          await webContainerManager.runScript('serve');
+        }
+      }
+    } catch (error: any) {
+      logger.error(error);
+      this.showError(`WebContainer error: ${error?.message}`);
+    }
+  }
+
+  private showLoading(message: string) {
+    document.body.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;background:#1a1a1a;">
+        <div style="margin-bottom:20px;">
+          <div style="width:40px;height:40px;border:3px solid #333;border-top-color:#0ea5e9;border-radius:50%;animation:spin 1s linear infinite;"></div>
+        </div>
+        <p style="color:#888;font-size:14px;">${message}</p>
+      </div>
+      <style>
+        @keyframes spin { to { transform: rotate(360deg); } }
+      </style>
+    `;
+  }
+
+  private showTerminal() {
+    document.body.innerHTML = `
+      <div style="display:flex;flex-direction:column;height:100vh;font-family:system-ui;background:#1a1a1a;">
+        <div style="padding:8px 12px;background:#252525;border-bottom:1px solid #333;display:flex;align-items:center;gap:8px;">
+          <span style="color:#888;font-size:12px;">Terminal</span>
+          <span id="status" style="color:#0ea5e9;font-size:11px;">Running...</span>
+        </div>
+        <div id="output" style="flex:1;overflow:auto;padding:12px;font-family:monospace;font-size:13px;color:#ccc;white-space:pre-wrap;"></div>
+        <div id="preview-container" style="display:none;flex:1;"></div>
+      </div>
+    `;
+    this.outputDiv = document.getElementById('output') as HTMLDivElement;
+  }
+
+  private appendOutput(data: string, type: 'stdout' | 'stderr' | 'exit') {
+    if (!this.outputDiv) return;
+
+    const span = document.createElement('span');
+    span.style.color = type === 'stderr' ? '#ef4444' : '#ccc';
+    span.textContent = data;
+    this.outputDiv.appendChild(span);
+    this.outputDiv.scrollTop = this.outputDiv.scrollHeight;
+  }
+
+  private showPreview(url: string) {
+    const container = document.getElementById('preview-container');
+    const output = document.getElementById('output');
+    const status = document.getElementById('status');
+
+    if (container && output && status) {
+      status.textContent = 'Server ready';
+      status.style.color = '#22c55e';
+
+      // Create iframe for preview
+      container.style.display = 'block';
+      container.innerHTML = `
+        <div style="padding:8px 12px;background:#252525;border-bottom:1px solid #333;display:flex;align-items:center;gap:8px;">
+          <span style="color:#888;font-size:12px;">Preview</span>
+          <a href="${url}" target="_blank" style="color:#0ea5e9;font-size:11px;text-decoration:none;">${url}</a>
+        </div>
+        <iframe src="${url}" style="width:100%;height:calc(100% - 36px);border:none;background:white;"></iframe>
+      `;
+
+      // Resize terminal
+      output.style.maxHeight = '200px';
+    }
+  }
+
+  private showError(message: string) {
+    document.body.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;background:#1a1a1a;">
+        <div style="text-align:center;max-width:400px;padding:40px;">
+          <div style="width:48px;height:48px;margin:0 auto 16px;border-radius:50%;background:#ef4444/20;display:flex;align-items:center;justify-content:center;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="15" y1="9" x2="9" y2="15"></line>
+              <line x1="9" y1="9" x2="15" y2="15"></line>
+            </svg>
+          </div>
+          <h2 style="color:#fff;font-size:18px;margin:0 0 8px;font-weight:500;">Error</h2>
+          <p style="color:#888;font-size:14px;margin:0;">${message}</p>
+        </div>
+      </div>
+    `;
+  }
+}
+
+// Check for WebContainer preview mode (URL: /wc-preview/:bundleId)
+function getWebContainerPreviewId(): string | null {
+  const match = window.location.pathname.match(/^\/wc-preview\/([^/]+)/);
+  return match ? match[1] : null;
+}
+
 // Initialize based on URL
+const wcBundleId = getWebContainerPreviewId();
 const bundleId = getPreviewBundleId();
-if (bundleId) {
+
+if (wcBundleId) {
+  new WebContainerPreviewInstance(wcBundleId);
+} else if (bundleId) {
   new PreviewInstance(bundleId);
 } else {
   new SandpackInstance();
