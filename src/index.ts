@@ -11,7 +11,21 @@ import { DisposableStore } from './utils/Disposable';
 import { getDocumentHeight } from './utils/document';
 import * as logger from './utils/logger';
 
+// Debug version marker
+console.log('[Sandpack] 🚀 Bundler loaded - version 2026-01-13-v4');
+
 const bundlerStartTime = Date.now();
+
+// Global error handler to catch unhandled errors
+window.onerror = (message, source, lineno, colno, error) => {
+  console.error('[Sandpack] Global error:', message, source, lineno, colno);
+  console.error('[Sandpack] Error object:', error);
+  return false;
+};
+
+window.onunhandledrejection = (event) => {
+  console.error('[Sandpack] Unhandled rejection:', event.reason);
+};
 
 // Check if we're in preview mode (URL: /preview/:bundleId)
 function getPreviewBundleId(): string | null {
