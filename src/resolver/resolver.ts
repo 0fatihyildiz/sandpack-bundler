@@ -286,6 +286,9 @@ function* getTSConfig(opts: IResolveOptions): Generator<any, ProcessedTSConfig |
   return config;
 }
 
+// Version marker for debugging - if you see this in console, new code is running
+console.log('[Resolver] 🚀 Resolver module loaded - version 2026-01-13-v3');
+
 export const resolver = gensync<(moduleSpecifier: string, inputOpts: IResolveOptionsInput) => string>(function* resolve(
   moduleSpecifier,
   inputOpts

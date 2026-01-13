@@ -3,23 +3,20 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Cache bust: v2
-ARG CACHEBUST=1
-
 # Install dependencies
 COPY package.json yarn.lock* ./
 RUN yarn install
 
-# Copy source and build
+# Copy source and build - v3 cache bust
 COPY . .
-RUN echo "Build version: $(date)" && yarn build
+RUN yarn build
 
 # Production stage
 FROM node:18-alpine AS production
 
 WORKDIR /app
 
-# Copy built files and server
+# Force fresh copy from builder
 COPY --from=builder /app/dist ./dist
 COPY server.js ./
 
