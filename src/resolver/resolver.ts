@@ -8,6 +8,15 @@ import { extractModuleSpecifierParts } from './utils/module-specifier';
 import { ProcessedPackageJSON, processPackageJSON } from './utils/pkg-json';
 import { ProcessedTSConfig, getPotentialPathsFromTSConfig, processTSConfig } from './utils/tsconfig';
 
+// Node.js built-in modules that should be resolved from root /node_modules
+const NODE_BUILTIN_MODULES = new Set([
+  'assert', 'buffer', 'child_process', 'cluster', 'console', 'constants',
+  'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'https',
+  'module', 'net', 'os', 'path', 'punycode', 'querystring', 'readline',
+  'repl', 'stream', 'string_decoder', 'sys', 'timers', 'tls', 'tty',
+  'url', 'util', 'vm', 'zlib', 'process'
+]);
+
 export type ResolverCache = Map<string, any>;
 
 export interface IResolveOptionsInput {
@@ -144,6 +153,34 @@ function* resolveModule(moduleSpecifier: string, opts: IResolveOptions): Generat
 
 function* resolveNodeModule(moduleSpecifier: string, opts: IResolveOptions): Generator<any, string, any> {
   const pkgSpecifierParts = extractModuleSpecifierParts(moduleSpecifier);
+
+  // For Node.js built-in modules, always check root /node_modules first
+  // This ensures our shims are used instead of nested node_modules
+  if (pkgSpecifierParts.pkgName && NODE_BUILTIN_MODULES.has(pkgSpecifierParts.pkgName)) {
+    const rootDir = pathUtils.join('/', 'node_modules', pkgSpecifierParts.pkgName);
+    const pkgFilePath = pathUtils.join(rootDir, pkgSpecifierParts.filepath || '');
+    try {
+      const pkgJson = yield* loadPackageJSON(pkgFilePath, opts, rootDir);
+      if (pkgJson) {
+        try {
+          return yield* resolver(pkgFilePath, {
+            ...opts,
+            filename: pkgJson.filepath,
+          });
+        } catch (err) {
+          if (!pkgSpecifierParts.filepath) {
+            return yield* resolver(pathUtils.join(pkgFilePath, 'index'), {
+              ...opts,
+              filename: pkgJson.filepath,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      // Fall through to normal resolution if built-in shim not found
+    }
+  }
+
   const directories = getParentDirectories(opts.filename);
   for (const modulesPath of opts.moduleDirectories) {
     for (const directory of directories) {
