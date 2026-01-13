@@ -1,15 +1,17 @@
-# Build stage
+# Build stage - FORCE REBUILD v4
 FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies - cache bust by changing this comment: v4-20260113
 COPY package.json yarn.lock* ./
-RUN yarn install
+RUN yarn install --network-timeout 100000
 
-# Copy source and build - v3 cache bust
+# Copy source and build
 COPY . .
-RUN yarn build
+
+# Force no cache - timestamp will change every build
+RUN echo "Build timestamp: $(date +%s)" > /tmp/build-version && yarn build
 
 # Production stage
 FROM node:18-alpine AS production
