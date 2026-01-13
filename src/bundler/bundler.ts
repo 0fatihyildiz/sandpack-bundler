@@ -58,9 +58,303 @@ export class Bundler {
     this.moduleRegistry = new ModuleRegistry(this);
     const memoryFS = new MemoryFSLayer();
     memoryFS.writeFile('//empty.js', 'module.exports = () => {};');
+
+    // Add Node.js built-in module polyfills/shims for browser environment
+    this.writeNodeBuiltinShims(memoryFS);
+
     this.iFrameFsLayer = new IFrameFSLayer(memoryFS, options.messageBus);
     this.fs = new FileSystem([memoryFS, this.iFrameFsLayer, new NodeModuleFSLayer(this.moduleRegistry)]);
     this.messageBus = options.messageBus;
+  }
+
+  /** Write Node.js built-in module shims for browser compatibility */
+  private writeNodeBuiltinShims(memoryFS: MemoryFSLayer): void {
+    // Empty shim for modules that don't need functionality in browser
+    const emptyShim = 'module.exports = {};';
+
+    // Stream shim - minimal implementation
+    const streamShim = `
+      var EventEmitter = require('events').EventEmitter || function() {};
+      function Stream() { EventEmitter.call(this); }
+      Stream.prototype = Object.create(EventEmitter.prototype || {});
+      Stream.prototype.constructor = Stream;
+      Stream.prototype.pipe = function(dest) { return dest; };
+      module.exports = Stream;
+      module.exports.Stream = Stream;
+      module.exports.Readable = Stream;
+      module.exports.Writable = Stream;
+      module.exports.Duplex = Stream;
+      module.exports.Transform = Stream;
+      module.exports.PassThrough = Stream;
+    `;
+
+    // Events shim - minimal EventEmitter
+    const eventsShim = `
+      function EventEmitter() { this._events = {}; }
+      EventEmitter.prototype.on = function(event, listener) {
+        if (!this._events[event]) this._events[event] = [];
+        this._events[event].push(listener);
+        return this;
+      };
+      EventEmitter.prototype.addListener = EventEmitter.prototype.on;
+      EventEmitter.prototype.once = function(event, listener) {
+        var self = this;
+        function onceWrapper() {
+          self.removeListener(event, onceWrapper);
+          listener.apply(this, arguments);
+        }
+        return this.on(event, onceWrapper);
+      };
+      EventEmitter.prototype.emit = function(event) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        var listeners = this._events[event] || [];
+        listeners.forEach(function(listener) { listener.apply(null, args); });
+        return listeners.length > 0;
+      };
+      EventEmitter.prototype.removeListener = function(event, listener) {
+        if (this._events[event]) {
+          this._events[event] = this._events[event].filter(function(l) { return l !== listener; });
+        }
+        return this;
+      };
+      EventEmitter.prototype.removeAllListeners = function(event) {
+        if (event) { this._events[event] = []; } else { this._events = {}; }
+        return this;
+      };
+      EventEmitter.prototype.listeners = function(event) { return this._events[event] || []; };
+      EventEmitter.prototype.setMaxListeners = function() { return this; };
+      module.exports = EventEmitter;
+      module.exports.EventEmitter = EventEmitter;
+    `;
+
+    // Util shim - minimal implementation
+    const utilShim = `
+      module.exports = {
+        inherits: function(ctor, superCtor) {
+          ctor.prototype = Object.create(superCtor.prototype);
+          ctor.prototype.constructor = ctor;
+        },
+        inspect: function(obj) { return JSON.stringify(obj); },
+        isArray: Array.isArray,
+        isBoolean: function(v) { return typeof v === 'boolean'; },
+        isNull: function(v) { return v === null; },
+        isNumber: function(v) { return typeof v === 'number'; },
+        isString: function(v) { return typeof v === 'string'; },
+        isUndefined: function(v) { return v === undefined; },
+        isObject: function(v) { return typeof v === 'object' && v !== null; },
+        isFunction: function(v) { return typeof v === 'function'; },
+        isBuffer: function(v) { return false; },
+        isRegExp: function(v) { return v instanceof RegExp; },
+        isDate: function(v) { return v instanceof Date; },
+        isError: function(v) { return v instanceof Error; },
+        format: function(f) {
+          var args = Array.prototype.slice.call(arguments, 1);
+          return f.replace(/%[sdj%]/g, function(x) {
+            if (x === '%%') return '%';
+            if (!args.length) return x;
+            var arg = args.shift();
+            if (x === '%s') return String(arg);
+            if (x === '%d') return Number(arg);
+            if (x === '%j') return JSON.stringify(arg);
+            return x;
+          });
+        },
+        deprecate: function(fn) { return fn; },
+        debuglog: function() { return function() {}; },
+        promisify: function(fn) {
+          return function() {
+            var args = Array.prototype.slice.call(arguments);
+            return new Promise(function(resolve, reject) {
+              args.push(function(err, result) {
+                if (err) reject(err); else resolve(result);
+              });
+              fn.apply(null, args);
+            });
+          };
+        }
+      };
+    `;
+
+    // Process shim
+    const processShim = `
+      module.exports = {
+        env: {},
+        cwd: function() { return '/'; },
+        nextTick: function(fn) { setTimeout(fn, 0); },
+        browser: true,
+        version: '',
+        versions: {},
+        platform: 'browser',
+        argv: [],
+        stderr: { write: function(s) { console.error(s); } },
+        stdout: { write: function(s) { console.log(s); } },
+        on: function() { return this; },
+        once: function() { return this; },
+        off: function() { return this; },
+        emit: function() {},
+        binding: function() { throw new Error('process.binding is not supported'); }
+      };
+    `;
+
+    // Buffer shim - basic implementation
+    const bufferShim = `
+      var Buffer = {
+        isBuffer: function(obj) { return false; },
+        from: function(data) { return new Uint8Array(data); },
+        alloc: function(size) { return new Uint8Array(size); },
+        allocUnsafe: function(size) { return new Uint8Array(size); },
+        concat: function(list) {
+          var totalLength = list.reduce(function(acc, buf) { return acc + buf.length; }, 0);
+          var result = new Uint8Array(totalLength);
+          var offset = 0;
+          list.forEach(function(buf) { result.set(buf, offset); offset += buf.length; });
+          return result;
+        }
+      };
+      module.exports = { Buffer: Buffer };
+      module.exports.Buffer = Buffer;
+    `;
+
+    // Assert shim
+    const assertShim = `
+      function assert(value, message) {
+        if (!value) throw new Error(message || 'Assertion failed');
+      }
+      assert.ok = assert;
+      assert.equal = function(a, b, msg) { if (a != b) throw new Error(msg || a + ' != ' + b); };
+      assert.strictEqual = function(a, b, msg) { if (a !== b) throw new Error(msg || a + ' !== ' + b); };
+      assert.notEqual = function(a, b, msg) { if (a == b) throw new Error(msg || a + ' == ' + b); };
+      assert.deepEqual = function(a, b, msg) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(msg); };
+      assert.throws = function(fn, expected, msg) {
+        try { fn(); throw new Error(msg || 'Expected function to throw'); } catch(e) {}
+      };
+      assert.fail = function(msg) { throw new Error(msg || 'Assert.fail()'); };
+      module.exports = assert;
+    `;
+
+    // Node.js built-in modules to shim
+    const nodeBuiltins: Record<string, string> = {
+      'stream': streamShim,
+      'events': eventsShim,
+      'util': utilShim,
+      'process': processShim,
+      'buffer': bufferShim,
+      'assert': assertShim,
+      // Empty shims for modules that can't work in browser
+      'fs': emptyShim,
+      'path': `
+        module.exports = {
+          join: function() { return Array.prototype.slice.call(arguments).join('/').replace(/\\/+/g, '/'); },
+          resolve: function() { return Array.prototype.slice.call(arguments).join('/').replace(/\\/+/g, '/'); },
+          dirname: function(p) { return p.split('/').slice(0, -1).join('/') || '/'; },
+          basename: function(p, ext) { var b = p.split('/').pop() || ''; if (ext && b.endsWith(ext)) b = b.slice(0, -ext.length); return b; },
+          extname: function(p) { var m = p.match(/\\.[^.]+$/); return m ? m[0] : ''; },
+          normalize: function(p) { return p.replace(/\\/+/g, '/'); },
+          isAbsolute: function(p) { return p[0] === '/'; },
+          relative: function(from, to) { return to; },
+          sep: '/',
+          delimiter: ':'
+        };
+      `,
+      'os': `
+        module.exports = {
+          platform: function() { return 'browser'; },
+          type: function() { return 'Browser'; },
+          arch: function() { return 'javascript'; },
+          release: function() { return ''; },
+          tmpdir: function() { return '/tmp'; },
+          homedir: function() { return '/'; },
+          hostname: function() { return 'localhost'; },
+          cpus: function() { return []; },
+          totalmem: function() { return 0; },
+          freemem: function() { return 0; },
+          loadavg: function() { return [0, 0, 0]; },
+          uptime: function() { return 0; },
+          networkInterfaces: function() { return {}; },
+          EOL: '\\n'
+        };
+      `,
+      'crypto': emptyShim,
+      'http': emptyShim,
+      'https': emptyShim,
+      'net': emptyShim,
+      'tls': emptyShim,
+      'dns': emptyShim,
+      'dgram': emptyShim,
+      'child_process': emptyShim,
+      'cluster': emptyShim,
+      'readline': emptyShim,
+      'repl': emptyShim,
+      'tty': emptyShim,
+      'vm': emptyShim,
+      'zlib': emptyShim,
+      'constants': 'module.exports = {};',
+      'module': emptyShim,
+      'domain': emptyShim,
+      'punycode': emptyShim,
+      'querystring': `
+        module.exports = {
+          parse: function(str) {
+            var obj = {};
+            str.split('&').forEach(function(pair) {
+              var parts = pair.split('=');
+              if (parts[0]) obj[decodeURIComponent(parts[0])] = decodeURIComponent(parts[1] || '');
+            });
+            return obj;
+          },
+          stringify: function(obj) {
+            return Object.keys(obj).map(function(k) {
+              return encodeURIComponent(k) + '=' + encodeURIComponent(obj[k]);
+            }).join('&');
+          }
+        };
+      `,
+      'string_decoder': `
+        function StringDecoder(encoding) { this.encoding = encoding || 'utf8'; }
+        StringDecoder.prototype.write = function(buffer) { return String.fromCharCode.apply(null, buffer); };
+        StringDecoder.prototype.end = function() { return ''; };
+        module.exports = { StringDecoder: StringDecoder };
+      `,
+      'url': `
+        module.exports = {
+          parse: function(urlStr) {
+            var a = document.createElement('a');
+            a.href = urlStr;
+            return {
+              protocol: a.protocol,
+              host: a.host,
+              hostname: a.hostname,
+              port: a.port,
+              pathname: a.pathname,
+              search: a.search,
+              hash: a.hash,
+              href: a.href
+            };
+          },
+          format: function(obj) { return obj.href || ''; },
+          resolve: function(from, to) { return new URL(to, from).href; }
+        };
+      `,
+      'timers': `
+        module.exports = {
+          setTimeout: setTimeout,
+          clearTimeout: clearTimeout,
+          setInterval: setInterval,
+          clearInterval: clearInterval,
+          setImmediate: function(fn) { return setTimeout(fn, 0); },
+          clearImmediate: clearTimeout
+        };
+      `
+    };
+
+    // Write all shims
+    for (const name in nodeBuiltins) {
+      if (Object.prototype.hasOwnProperty.call(nodeBuiltins, name)) {
+        const code = nodeBuiltins[name];
+        memoryFS.writeFile(`/node_modules/${name}/index.js`, code);
+        memoryFS.writeFile(`/node_modules/${name}/package.json`, JSON.stringify({ name, main: 'index.js' }));
+      }
+    }
   }
 
   /** Reset all compilation data */
