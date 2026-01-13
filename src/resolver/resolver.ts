@@ -155,19 +155,12 @@ function* resolveNodeModule(moduleSpecifier: string, opts: IResolveOptions): Gen
   const pkgSpecifierParts = extractModuleSpecifierParts(moduleSpecifier);
 
   // For Node.js built-in modules, always resolve to root /node_modules shims
-  // These shims are pre-written to MemoryFSLayer and should always be used
+  // These shims are guaranteed to be pre-written to MemoryFSLayer by the Bundler
+  // We return the path directly without file existence check for reliability
   if (pkgSpecifierParts.pkgName && NODE_BUILTIN_MODULES.has(pkgSpecifierParts.pkgName)) {
-    // Try multiple possible paths for the shim
-    const shimPaths = [
-      `/node_modules/${pkgSpecifierParts.pkgName}/index.js`,
-      `/node_modules/${pkgSpecifierParts.pkgName}.js`,
-    ];
-    for (const shimPath of shimPaths) {
-      const shimExists = yield* isFile(shimPath, opts.isFile);
-      if (shimExists) {
-        return shimPath;
-      }
-    }
+    // Handle subpath imports like 'stream/promises', 'stream/web', etc.
+    // All subpaths resolve to the main shim since browser shims are unified
+    return `/node_modules/${pkgSpecifierParts.pkgName}/index.js`;
   }
 
   const directories = getParentDirectories(opts.filename);
@@ -297,7 +290,13 @@ export const resolver = gensync<(moduleSpecifier: string, inputOpts: IResolveOpt
   moduleSpecifier,
   inputOpts
 ): Generator<any, string, any> {
-  const normalizedSpecifier = normalizeModuleSpecifier(moduleSpecifier);
+  // Handle node: prefix (e.g., node:stream, node:path)
+  let specifierToResolve = moduleSpecifier;
+  if (moduleSpecifier.startsWith('node:')) {
+    specifierToResolve = moduleSpecifier.slice(5); // Remove 'node:' prefix
+  }
+
+  const normalizedSpecifier = normalizeModuleSpecifier(specifierToResolve);
   const opts = normalizeResolverOptions(inputOpts);
   const modulePath = yield* resolveModule(normalizedSpecifier, opts);
 

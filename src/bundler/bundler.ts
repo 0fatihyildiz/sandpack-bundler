@@ -72,13 +72,22 @@ export class Bundler {
     // Empty shim for modules that don't need functionality in browser
     const emptyShim = 'module.exports = {};';
 
-    // Stream shim - minimal implementation
+    // Stream shim - self-contained minimal implementation (no require)
     const streamShim = `
-      var EventEmitter = require('events').EventEmitter || function() {};
-      function Stream() { EventEmitter.call(this); }
-      Stream.prototype = Object.create(EventEmitter.prototype || {});
-      Stream.prototype.constructor = Stream;
+      function Stream() {}
       Stream.prototype.pipe = function(dest) { return dest; };
+      Stream.prototype.on = function() { return this; };
+      Stream.prototype.once = function() { return this; };
+      Stream.prototype.emit = function() { return false; };
+      Stream.prototype.write = function() { return true; };
+      Stream.prototype.end = function() {};
+      Stream.prototype.destroy = function() {};
+      Stream.prototype.read = function() { return null; };
+      Stream.prototype.pause = function() { return this; };
+      Stream.prototype.resume = function() { return this; };
+      Stream.prototype.setEncoding = function() { return this; };
+      Stream.prototype.unpipe = function() { return this; };
+      Stream.prototype.push = function() { return true; };
       module.exports = Stream;
       module.exports.Stream = Stream;
       module.exports.Readable = Stream;
@@ -86,6 +95,8 @@ export class Bundler {
       module.exports.Duplex = Stream;
       module.exports.Transform = Stream;
       module.exports.PassThrough = Stream;
+      module.exports.pipeline = function() { var cb = arguments[arguments.length - 1]; if (typeof cb === 'function') cb(); };
+      module.exports.finished = function(stream, cb) { if (typeof cb === 'function') cb(); };
     `;
 
     // Events shim - minimal EventEmitter
@@ -318,21 +329,36 @@ export class Bundler {
       'url': `
         module.exports = {
           parse: function(urlStr) {
-            var a = document.createElement('a');
-            a.href = urlStr;
-            return {
-              protocol: a.protocol,
-              host: a.host,
-              hostname: a.hostname,
-              port: a.port,
-              pathname: a.pathname,
-              search: a.search,
-              hash: a.hash,
-              href: a.href
-            };
+            try {
+              var url = new URL(urlStr, 'http://localhost');
+              return {
+                protocol: url.protocol,
+                host: url.host,
+                hostname: url.hostname,
+                port: url.port,
+                pathname: url.pathname,
+                search: url.search,
+                hash: url.hash,
+                href: url.href,
+                query: url.search ? url.search.slice(1) : '',
+                path: url.pathname + url.search
+              };
+            } catch(e) {
+              return { href: urlStr, pathname: urlStr, protocol: '', host: '', hostname: '', port: '', search: '', hash: '', query: '', path: urlStr };
+            }
           },
-          format: function(obj) { return obj.href || ''; },
-          resolve: function(from, to) { return new URL(to, from).href; }
+          format: function(obj) {
+            if (obj.href) return obj.href;
+            var protocol = obj.protocol || '';
+            var host = obj.host || (obj.hostname || '') + (obj.port ? ':' + obj.port : '');
+            var pathname = obj.pathname || '/';
+            var search = obj.search || (obj.query ? '?' + obj.query : '');
+            var hash = obj.hash || '';
+            return protocol + '//' + host + pathname + search + hash;
+          },
+          resolve: function(from, to) { try { return new URL(to, from).href; } catch(e) { return to; } },
+          URL: typeof URL !== 'undefined' ? URL : function() {},
+          URLSearchParams: typeof URLSearchParams !== 'undefined' ? URLSearchParams : function() {}
         };
       `,
       'timers': `
@@ -343,6 +369,28 @@ export class Bundler {
           clearInterval: clearInterval,
           setImmediate: function(fn) { return setTimeout(fn, 0); },
           clearImmediate: clearTimeout
+        };
+      `,
+      'sys': utilShim, // sys is deprecated alias for util
+      'console': `
+        module.exports = {
+          log: console.log.bind(console),
+          info: console.info.bind(console),
+          warn: console.warn.bind(console),
+          error: console.error.bind(console),
+          debug: console.debug ? console.debug.bind(console) : console.log.bind(console),
+          trace: console.trace ? console.trace.bind(console) : console.log.bind(console),
+          dir: console.dir ? console.dir.bind(console) : console.log.bind(console),
+          assert: console.assert ? console.assert.bind(console) : function() {},
+          time: console.time ? console.time.bind(console) : function() {},
+          timeEnd: console.timeEnd ? console.timeEnd.bind(console) : function() {},
+          table: console.table ? console.table.bind(console) : console.log.bind(console),
+          group: console.group ? console.group.bind(console) : function() {},
+          groupEnd: console.groupEnd ? console.groupEnd.bind(console) : function() {},
+          clear: console.clear ? console.clear.bind(console) : function() {},
+          count: console.count ? console.count.bind(console) : function() {},
+          countReset: console.countReset ? console.countReset.bind(console) : function() {},
+          Console: function() { return console; }
         };
       `
     };
