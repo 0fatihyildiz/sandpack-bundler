@@ -7,12 +7,13 @@
     "esModuleInterop": true,
     "sourceMap": true,
     "allowJs": true,
-    "lib": ["es6", "dom"],
+    "lib": ["es2017", "dom"],
     "rootDir": "src",
     "moduleResolution": "node",
     "downlevelIteration": true,
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "noEmit": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "fixture"]
+  "exclude": ["node_modules", "dist", "fixture", "src/resolver/fixture", "**/fixture/**"]
 }

@@ -154,30 +154,19 @@ function* resolveModule(moduleSpecifier: string, opts: IResolveOptions): Generat
 function* resolveNodeModule(moduleSpecifier: string, opts: IResolveOptions): Generator<any, string, any> {
   const pkgSpecifierParts = extractModuleSpecifierParts(moduleSpecifier);
 
-  // For Node.js built-in modules, always check root /node_modules first
-  // This ensures our shims are used instead of nested node_modules
+  // For Node.js built-in modules, always resolve to root /node_modules shims
+  // These shims are pre-written to MemoryFSLayer and should always be used
   if (pkgSpecifierParts.pkgName && NODE_BUILTIN_MODULES.has(pkgSpecifierParts.pkgName)) {
-    const rootDir = pathUtils.join('/', 'node_modules', pkgSpecifierParts.pkgName);
-    const pkgFilePath = pathUtils.join(rootDir, pkgSpecifierParts.filepath || '');
-    try {
-      const pkgJson = yield* loadPackageJSON(pkgFilePath, opts, rootDir);
-      if (pkgJson) {
-        try {
-          return yield* resolver(pkgFilePath, {
-            ...opts,
-            filename: pkgJson.filepath,
-          });
-        } catch (err) {
-          if (!pkgSpecifierParts.filepath) {
-            return yield* resolver(pathUtils.join(pkgFilePath, 'index'), {
-              ...opts,
-              filename: pkgJson.filepath,
-            });
-          }
-        }
+    // Try multiple possible paths for the shim
+    const shimPaths = [
+      `/node_modules/${pkgSpecifierParts.pkgName}/index.js`,
+      `/node_modules/${pkgSpecifierParts.pkgName}.js`,
+    ];
+    for (const shimPath of shimPaths) {
+      const shimExists = yield* isFile(shimPath, opts.isFile);
+      if (shimExists) {
+        return shimPath;
       }
-    } catch (err) {
-      // Fall through to normal resolution if built-in shim not found
     }
   }
 

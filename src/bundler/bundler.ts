@@ -347,12 +347,15 @@ export class Bundler {
       `
     };
 
-    // Write all shims
+    // Write all shims in multiple locations for maximum compatibility
     for (const name in nodeBuiltins) {
       if (Object.prototype.hasOwnProperty.call(nodeBuiltins, name)) {
         const code = nodeBuiltins[name];
+        // Standard location: /node_modules/{name}/index.js
         memoryFS.writeFile(`/node_modules/${name}/index.js`, code);
-        memoryFS.writeFile(`/node_modules/${name}/package.json`, JSON.stringify({ name, main: 'index.js' }));
+        memoryFS.writeFile(`/node_modules/${name}/package.json`, JSON.stringify({ name, main: 'index.js', version: '1.0.0' }));
+        // Also write as direct file for simpler resolution
+        memoryFS.writeFile(`/node_modules/${name}.js`, code);
       }
     }
   }
