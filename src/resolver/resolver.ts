@@ -297,6 +297,16 @@ export const resolver = gensync<(moduleSpecifier: string, inputOpts: IResolveOpt
   }
 
   const normalizedSpecifier = normalizeModuleSpecifier(specifierToResolve);
+
+  // EARLY CHECK: For Node.js built-in modules, immediately return the shim path
+  // This must happen BEFORE any other resolution logic to avoid filesystem lookups
+  // that would fail for built-in modules like 'stream', 'path', 'fs', etc.
+  const pkgParts = extractModuleSpecifierParts(normalizedSpecifier);
+  if (pkgParts.pkgName && NODE_BUILTIN_MODULES.has(pkgParts.pkgName)) {
+    // Return shim path directly - these are guaranteed to exist in MemoryFSLayer
+    return `/node_modules/${pkgParts.pkgName}/index.js`;
+  }
+
   const opts = normalizeResolverOptions(inputOpts);
   const modulePath = yield* resolveModule(normalizedSpecifier, opts);
 
