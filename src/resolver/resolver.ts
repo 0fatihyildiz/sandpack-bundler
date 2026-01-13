@@ -287,13 +287,20 @@ function* getTSConfig(opts: IResolveOptions): Generator<any, ProcessedTSConfig |
 }
 
 // Version marker for debugging - if you see this in console, new code is running
-console.log('[Resolver] 🚀 Resolver module loaded - version 2026-01-13-v3');
+console.log('[Resolver] 🚀 Resolver module loaded - version 2026-01-13-v5');
+console.log('[Resolver] NODE_BUILTIN_MODULES:', Array.from(NODE_BUILTIN_MODULES));
 
 export const resolver = gensync<(moduleSpecifier: string, inputOpts: IResolveOptionsInput) => string>(function* resolve(
   moduleSpecifier,
   inputOpts
 ): Generator<any, string, any> {
-  console.log('[Resolver] Resolving:', moduleSpecifier, 'from:', inputOpts.filename);
+  // Debug: Log every resolution attempt
+  const isBuiltinCandidate = NODE_BUILTIN_MODULES.has(moduleSpecifier) ||
+                              NODE_BUILTIN_MODULES.has(moduleSpecifier.split('/')[0]);
+
+  if (isBuiltinCandidate) {
+    console.log('[Resolver] ⚡ BUILTIN CANDIDATE:', moduleSpecifier, 'from:', inputOpts.filename);
+  }
 
   // Handle node: prefix (e.g., node:stream, node:path)
   let specifierToResolve = moduleSpecifier;
@@ -308,11 +315,12 @@ export const resolver = gensync<(moduleSpecifier: string, inputOpts: IResolveOpt
   // This must happen BEFORE any other resolution logic to avoid filesystem lookups
   // that would fail for built-in modules like 'stream', 'path', 'fs', etc.
   const pkgParts = extractModuleSpecifierParts(normalizedSpecifier);
-  console.log('[Resolver] Package parts:', pkgParts.pkgName, 'filepath:', pkgParts.filepath);
+
+  console.log('[Resolver] Checking:', normalizedSpecifier, '| pkgName:', pkgParts.pkgName, '| isBuiltin:', NODE_BUILTIN_MODULES.has(pkgParts.pkgName || ''));
 
   if (pkgParts.pkgName && NODE_BUILTIN_MODULES.has(pkgParts.pkgName)) {
     const shimPath = `/node_modules/${pkgParts.pkgName}/index.js`;
-    console.log('[Resolver] ✓ Node.js built-in detected, returning shim:', shimPath);
+    console.log('[Resolver] ✓ RETURNING SHIM:', shimPath, 'for:', moduleSpecifier);
     return shimPath;
   }
 
