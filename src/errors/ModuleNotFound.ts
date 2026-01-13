@@ -10,9 +10,5 @@ export class ModuleNotFoundError extends SandpackError {
     super(`Cannot find module '${filepath}' from '${parent}'`);
     this.parent = parent;
     this.filepath = filepath;
-
-    // Debug: Log stack trace to see where this error originated
-    console.error('[ModuleNotFoundError] Module:', filepath, 'Parent:', parent);
-    console.error('[ModuleNotFoundError] Stack:', new Error().stack);
   }
 }

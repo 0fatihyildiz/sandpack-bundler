@@ -3,6 +3,33 @@ import { Bundler } from '../bundler';
 import { Evaluation } from './Evaluation';
 import { HotContext } from './hot';
 
+// Node.js built-in modules - these should resolve to our shims
+const NODE_BUILTIN_MODULES = new Set([
+  'assert', 'buffer', 'child_process', 'cluster', 'console', 'constants',
+  'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'https',
+  'module', 'net', 'os', 'path', 'punycode', 'querystring', 'readline',
+  'repl', 'stream', 'string_decoder', 'sys', 'timers', 'tls', 'tty',
+  'url', 'util', 'vm', 'zlib', 'process', '_stream_duplex', '_stream_passthrough',
+  '_stream_readable', '_stream_transform', '_stream_writable'
+]);
+
+function getBuiltinShimPath(specifier: string): string | null {
+  // Handle node: prefix
+  let moduleName = specifier;
+  if (moduleName.startsWith('node:')) {
+    moduleName = moduleName.slice(5);
+  }
+
+  // Get the base module name (e.g., 'stream' from 'stream/promises')
+  const baseName = moduleName.split('/')[0];
+
+  if (NODE_BUILTIN_MODULES.has(baseName)) {
+    return `/node_modules/${baseName}/index.js`;
+  }
+
+  return null;
+}
+
 export interface IDependencyEvent {
   specifier: string;
 }
@@ -44,6 +71,15 @@ export class Module {
 
   /** Add dependency */
   async addDependency(depSpecifier: string): Promise<void> {
+    // Check if this is a Node.js built-in module - use shim path directly
+    const shimPath = getBuiltinShimPath(depSpecifier);
+    if (shimPath) {
+      this.dependencies.add(shimPath);
+      this.dependencyMap.set(depSpecifier, shimPath);
+      this.bundler.addInitiator(shimPath, this.id);
+      return;
+    }
+
     const resolved = await this.bundler.resolveAsync(depSpecifier, this.filepath);
     this.dependencies.add(resolved);
     this.dependencyMap.set(depSpecifier, resolved);
