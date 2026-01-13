@@ -3,6 +3,28 @@ import evaluate from './eval';
 import { HotContext } from './hot';
 import { Module } from './Module';
 
+// Node.js built-in modules for runtime resolution fallback
+const NODE_BUILTIN_MODULES = new Set([
+  'assert', 'buffer', 'child_process', 'cluster', 'console', 'constants',
+  'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'https',
+  'module', 'net', 'os', 'path', 'punycode', 'querystring', 'readline',
+  'repl', 'stream', 'string_decoder', 'sys', 'timers', 'tls', 'tty',
+  'url', 'util', 'vm', 'zlib', 'process', '_stream_duplex', '_stream_passthrough',
+  '_stream_readable', '_stream_transform', '_stream_writable'
+]);
+
+function getBuiltinShimPath(specifier: string): string | null {
+  let moduleName = specifier;
+  if (moduleName.startsWith('node:')) {
+    moduleName = moduleName.slice(5);
+  }
+  const baseName = moduleName.split('/')[0];
+  if (NODE_BUILTIN_MODULES.has(baseName)) {
+    return `/node_modules/${baseName}/index.js`;
+  }
+  return null;
+}
+
 class EvaluationContext {
   exports: any;
   globals: any;
@@ -31,7 +53,16 @@ export class Evaluation {
   }
 
   require(specifier: string): any {
-    const moduleFilePath = this.module.dependencyMap.get(specifier);
+    let moduleFilePath = this.module.dependencyMap.get(specifier);
+
+    // If not found in dependency map, check if it's a Node.js built-in module
+    if (!moduleFilePath) {
+      const shimPath = getBuiltinShimPath(specifier);
+      if (shimPath) {
+        moduleFilePath = shimPath;
+      }
+    }
+
     if (!moduleFilePath) {
       logger.debug('Require', {
         dependencies: this.module.dependencyMap,
@@ -40,8 +71,22 @@ export class Evaluation {
 
       throw new Error(`Dependency "${specifier}" not collected from "${this.module.filepath}"`);
     }
+
     const module = this.module.bundler.getModule(moduleFilePath);
     if (!module) {
+      // For Node.js built-ins, create a module on-the-fly from the shim
+      const shimPath = getBuiltinShimPath(specifier);
+      if (shimPath) {
+        try {
+          const shimCode = this.module.bundler.fs.readFileSync(shimPath);
+          const shimModule = new Module(shimPath, shimCode, true, this.module.bundler);
+          this.module.bundler.modules.set(shimPath, shimModule);
+          return shimModule.evaluate().context.exports ?? {};
+        } catch (err) {
+          // Shim not found, return empty object for Node.js built-ins
+          return {};
+        }
+      }
       throw new Error(`Module "${moduleFilePath}" has not been transpiled`);
     }
     return module.evaluate().context.exports ?? {};
