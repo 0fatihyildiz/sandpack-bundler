@@ -290,10 +290,13 @@ export const resolver = gensync<(moduleSpecifier: string, inputOpts: IResolveOpt
   moduleSpecifier,
   inputOpts
 ): Generator<any, string, any> {
+  console.log('[Resolver] Resolving:', moduleSpecifier, 'from:', inputOpts.filename);
+
   // Handle node: prefix (e.g., node:stream, node:path)
   let specifierToResolve = moduleSpecifier;
   if (moduleSpecifier.startsWith('node:')) {
     specifierToResolve = moduleSpecifier.slice(5); // Remove 'node:' prefix
+    console.log('[Resolver] Stripped node: prefix, now resolving:', specifierToResolve);
   }
 
   const normalizedSpecifier = normalizeModuleSpecifier(specifierToResolve);
@@ -302,9 +305,12 @@ export const resolver = gensync<(moduleSpecifier: string, inputOpts: IResolveOpt
   // This must happen BEFORE any other resolution logic to avoid filesystem lookups
   // that would fail for built-in modules like 'stream', 'path', 'fs', etc.
   const pkgParts = extractModuleSpecifierParts(normalizedSpecifier);
+  console.log('[Resolver] Package parts:', pkgParts.pkgName, 'filepath:', pkgParts.filepath);
+
   if (pkgParts.pkgName && NODE_BUILTIN_MODULES.has(pkgParts.pkgName)) {
-    // Return shim path directly - these are guaranteed to exist in MemoryFSLayer
-    return `/node_modules/${pkgParts.pkgName}/index.js`;
+    const shimPath = `/node_modules/${pkgParts.pkgName}/index.js`;
+    console.log('[Resolver] ✓ Node.js built-in detected, returning shim:', shimPath);
+    return shimPath;
   }
 
   const opts = normalizeResolverOptions(inputOpts);
