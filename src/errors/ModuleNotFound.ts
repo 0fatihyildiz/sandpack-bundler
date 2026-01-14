@@ -7,7 +7,7 @@ export class ModuleNotFoundError extends SandpackError {
   parent: string;
 
   constructor(filepath: string, parent: string) {
-    super(`Cannot find module '${filepath}' from '${parent}'`);
+    super(`[RESOLVER_v2] Cannot find module '${filepath}' from '${parent}'`);
     this.parent = parent;
     this.filepath = filepath;
   }

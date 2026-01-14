@@ -53,41 +53,39 @@ export class Evaluation {
   }
 
   require(specifier: string): any {
-    let moduleFilePath = this.module.dependencyMap.get(specifier);
-
-    // If not found in dependency map, check if it's a Node.js built-in module
-    if (!moduleFilePath) {
-      const shimPath = getBuiltinShimPath(specifier);
-      if (shimPath) {
-        moduleFilePath = shimPath;
+    // RUNTIME v2: First check if this is a Node.js built-in module
+    const shimPath = getBuiltinShimPath(specifier);
+    if (shimPath) {
+      // Try to get existing module first
+      let shimModule = this.module.bundler.getModule(shimPath);
+      if (!shimModule) {
+        // Create module on-the-fly from the shim in MemoryFS
+        try {
+          const shimCode = this.module.bundler.fs.readFileSync(shimPath);
+          shimModule = new Module(shimPath, shimCode, true, this.module.bundler);
+          this.module.bundler.modules.set(shimPath, shimModule);
+        } catch (err) {
+          logger.debug(`[Evaluation] Shim not found for ${specifier}, returning empty object`);
+          return {};
+        }
       }
+      return shimModule.evaluate().context.exports ?? {};
     }
 
+    let moduleFilePath = this.module.dependencyMap.get(specifier);
+
     if (!moduleFilePath) {
-      logger.debug('Require', {
+      logger.debug('[Evaluation] Require failed', {
         dependencies: this.module.dependencyMap,
         specifier,
       });
 
-      throw new Error(`Dependency "${specifier}" not collected from "${this.module.filepath}"`);
+      throw new Error(`[RUNTIME_v2] Dependency "${specifier}" not collected from "${this.module.filepath}"`);
     }
 
     const module = this.module.bundler.getModule(moduleFilePath);
     if (!module) {
-      // For Node.js built-ins, create a module on-the-fly from the shim
-      const shimPath = getBuiltinShimPath(specifier);
-      if (shimPath) {
-        try {
-          const shimCode = this.module.bundler.fs.readFileSync(shimPath);
-          const shimModule = new Module(shimPath, shimCode, true, this.module.bundler);
-          this.module.bundler.modules.set(shimPath, shimModule);
-          return shimModule.evaluate().context.exports ?? {};
-        } catch (err) {
-          // Shim not found, return empty object for Node.js built-ins
-          return {};
-        }
-      }
-      throw new Error(`Module "${moduleFilePath}" has not been transpiled`);
+      throw new Error(`[RUNTIME_v2] Module "${moduleFilePath}" has not been transpiled`);
     }
     return module.evaluate().context.exports ?? {};
   }
