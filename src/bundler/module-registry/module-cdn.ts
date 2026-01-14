@@ -10,6 +10,9 @@ const ESM_SH_ROOT = 'https://esm.sh/';
 const SKYPACK_ROOT = 'https://cdn.skypack.dev/';
 const UNPKG_ROOT = 'https://unpkg.com/';
 
+// Use esm.sh as primary CDN - it automatically handles Node.js polyfills
+const USE_ESM_SH_PRIMARY = true;
+
 export interface IResolvedDependency {
   // name
   n: string;
@@ -69,11 +72,18 @@ export interface ICDNModule {
   m: string[];
 }
 
-// Fetch module from esm.sh
+// Fetch module from esm.sh with Node.js polyfills
 async function fetchFromEsmSh(name: string, version: string): Promise<string> {
-  const url = `${ESM_SH_ROOT}${name}@${version}?bundle`;
-  const response = await retryFetch(url, { maxRetries: 2 });
-  return response.text();
+  // ?bundle - bundle all dependencies into single file
+  // &target=es2020 - target modern browsers
+  // &no-check - skip type checking for faster builds
+  // esm.sh automatically replaces Node.js built-ins with browser polyfills
+  const url = `${ESM_SH_ROOT}${name}@${version}?bundle&target=es2020&no-check`;
+  logger.debug(`[esm.sh] Fetching: ${url}`);
+  const response = await retryFetch(url, { maxRetries: 3, retryDelay: 500 });
+  const code = await response.text();
+  logger.debug(`[esm.sh] Successfully fetched ${name}@${version} (${code.length} bytes)`);
+  return code;
 }
 
 // Fetch module from Skypack
@@ -104,7 +114,28 @@ async function fetchFromUnpkg(name: string, version: string): Promise<string> {
 }
 
 export async function fetchModule(name: string, version: string): Promise<ICDNModule> {
-  // Try Sandpack CDN first
+  logger.debug(`[fetchModule] Fetching ${name}@${version}, USE_ESM_SH_PRIMARY=${USE_ESM_SH_PRIMARY}`);
+
+  // Use esm.sh as primary CDN - it handles Node.js polyfills automatically
+  if (USE_ESM_SH_PRIMARY) {
+    try {
+      const code = await fetchFromEsmSh(name, version);
+      return {
+        f: {
+          'index.js': {
+            c: code,
+            d: [], // esm.sh bundles all dependencies
+            t: true,
+          },
+        },
+        m: [],
+      };
+    } catch (err) {
+      logger.warn(`[fetchModule] esm.sh failed for ${name}@${version}, trying Sandpack CDN`);
+    }
+  }
+
+  // Try Sandpack CDN
   try {
     const specifier = `${name}@${version}`;
     const encoded_specifier = encodePayload(specifier);
@@ -112,27 +143,28 @@ export async function fetchModule(name: string, version: string): Promise<ICDNMo
     const buffer = await result.arrayBuffer();
     return decodeMsgPack(buffer) as ICDNModule;
   } catch (err) {
-    logger.warn(`Sandpack CDN failed for ${name}@${version}, trying fallback CDNs`);
+    logger.warn(`[fetchModule] Sandpack CDN failed for ${name}@${version}, trying fallback CDNs`);
   }
 
   // Try fallback CDNs
   let code: string | null = null;
 
-  // Try esm.sh first (best for modern ESM)
-  try {
-    code = await fetchFromEsmSh(name, version);
-    logger.debug(`Fetched ${name}@${version} from esm.sh`);
-  } catch {
-    logger.debug(`esm.sh failed for ${name}@${version}`);
+  // Try esm.sh (if not already tried as primary)
+  if (!USE_ESM_SH_PRIMARY) {
+    try {
+      code = await fetchFromEsmSh(name, version);
+    } catch {
+      logger.debug(`[fetchModule] esm.sh fallback failed for ${name}@${version}`);
+    }
   }
 
   // Try Skypack
   if (!code) {
     try {
       code = await fetchFromSkypack(name, version);
-      logger.debug(`Fetched ${name}@${version} from Skypack`);
+      logger.debug(`[fetchModule] Fetched ${name}@${version} from Skypack`);
     } catch {
-      logger.debug(`Skypack failed for ${name}@${version}`);
+      logger.debug(`[fetchModule] Skypack failed for ${name}@${version}`);
     }
   }
 
@@ -140,9 +172,9 @@ export async function fetchModule(name: string, version: string): Promise<ICDNMo
   if (!code) {
     try {
       code = await fetchFromUnpkg(name, version);
-      logger.debug(`Fetched ${name}@${version} from unpkg`);
+      logger.debug(`[fetchModule] Fetched ${name}@${version} from unpkg`);
     } catch {
-      logger.debug(`unpkg failed for ${name}@${version}`);
+      logger.debug(`[fetchModule] unpkg failed for ${name}@${version}`);
     }
   }
 
